@@ -12,6 +12,14 @@
     "index.js"
   ],
   "main": "./index.js",
+  "exports": "./index.js",
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "nan",
+    "quota",
+    "status-bar"
+  ],
   "pi": {
     "extensions": ["./index.js"]
   },
