@@ -5,6 +5,8 @@ import { join } from "node:path";
 const QUOTA_URL = "https://cloud-api.nan.builders/api/usage/quota";
 const USER_AGENT = "pi-nan/0.1.0 (+https://github.com/snevadalabs/pi-nan)";
 const WARNING_RATIO = 0.8;
+// ponytail: refresh cadence is hardcoded at 5 minutes; make it configurable if a use case needs a different one.
+const REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 const KEY_FILE = join(homedir(), ".config", "nan", "api-key");
 
 function defaultReadKey() {
@@ -61,7 +63,10 @@ function setQuotaStatus(ctx, model, now) {
 }
 
 export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultReadKey, now = () => new Date() } = {}) {
+  let lastAttemptAt = null;
+
   async function refreshStatus(ctx) {
+    lastAttemptAt = now().getTime();
     const key = (readKey() || "").trim();
     if (!key) {
       ctx?.ui?.notify?.("pi-nan: no NaN API key found (set $NAN_API_KEY or ~/.config/nan/api-key)", "info");
@@ -85,6 +90,12 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    await refreshStatus(ctx);
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    const nowMs = now().getTime();
+    if (lastAttemptAt !== null && nowMs - lastAttemptAt < REFRESH_THROTTLE_MS) return;
     await refreshStatus(ctx);
   });
 }

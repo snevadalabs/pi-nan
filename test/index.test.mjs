@@ -177,3 +177,86 @@ test("cap of 0 is treated as ratio 0 without throwing", async () => {
   assert.equal(ctx.statuses.length, 1);
   assert.match(ctx.statuses[0].text, /glm/);
 });
+
+test("agent_end within the 5-minute throttle makes no fetch call", async () => {
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return { ok: true, json: async () => quotaResponse([{ model: "glm", tokensUsed: 10, cap: 100, periodEnd: "2026-09-05T00:00:00Z" }]) };
+  };
+  let clock = new Date("2026-09-02T00:00:00Z");
+
+  const { events } = createHarness({ fetchImpl, readKey: () => "secret-key", now: () => clock });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  assert.equal(fetchCalls, 1);
+
+  clock = new Date("2026-09-02T00:04:00Z");
+  await events.get("agent_end")({}, ctx);
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(ctx.statuses.length, 1);
+});
+
+test("agent_end refreshes once 5 minutes have passed since the last fetch", async () => {
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return { ok: true, json: async () => quotaResponse([{ model: "glm", tokensUsed: 10, cap: 100, periodEnd: "2026-09-05T00:00:00Z" }]) };
+  };
+  let clock = new Date("2026-09-02T00:00:00Z");
+
+  const { events } = createHarness({ fetchImpl, readKey: () => "secret-key", now: () => clock });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  assert.equal(fetchCalls, 1);
+
+  clock = new Date("2026-09-02T00:05:01Z");
+  await events.get("agent_end")({}, ctx);
+
+  assert.equal(fetchCalls, 2);
+  assert.equal(ctx.statuses.length, 2);
+});
+
+test("agent_end fetch failure after the throttle window leaves previous status untouched", async () => {
+  let clock = new Date("2026-09-02T00:00:00Z");
+  let fail = false;
+  const fetchImpl = async () => {
+    if (fail) throw new Error("network down");
+    return { ok: true, json: async () => quotaResponse([{ model: "glm", tokensUsed: 10, cap: 100, periodEnd: "2026-09-05T00:00:00Z" }]) };
+  };
+
+  const { events } = createHarness({ fetchImpl, readKey: () => "secret-key", now: () => clock });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  const firstStatus = ctx.statuses[0];
+
+  fail = true;
+  clock = new Date("2026-09-02T00:05:01Z");
+  await events.get("agent_end")({}, ctx);
+
+  assert.equal(ctx.statuses.length, 1);
+  assert.deepEqual(ctx.statuses[0], firstStatus);
+  assert.equal(ctx.notifications.length, 0);
+});
+
+test("no key: agent_end inside the throttle window does not repeat the startup notice", async () => {
+  let clock = new Date("2026-09-02T00:00:00Z");
+  const fetchImpl = async () => {
+    throw new Error("should not be called");
+  };
+
+  const { events } = createHarness({ fetchImpl, readKey: () => "", now: () => clock });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  assert.equal(ctx.notifications.length, 1);
+
+  clock = new Date("2026-09-02T00:04:00Z");
+  await events.get("agent_end")({}, ctx);
+
+  assert.equal(ctx.notifications.length, 1);
+});
