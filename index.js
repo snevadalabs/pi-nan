@@ -26,6 +26,16 @@ function mostConstrained(models) {
   return models.reduce((best, m) => (ratio(m) > ratio(best) ? m : best));
 }
 
+function sortByRatioDesc(models) {
+  return [...models].sort((a, b) => ratio(b) - ratio(a));
+}
+
+function humanCount(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.floor(n / 1_000)}k`;
+  return `${n}`;
+}
+
 function relativeTime(isoDate, now) {
   const diffMs = new Date(isoDate).getTime() - now.getTime();
   const hours = Math.floor(diffMs / (60 * 60 * 1000));
@@ -84,7 +94,42 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
     setQuotaStatus(ctx, mostConstrained(quota.models), now());
   }
 
+  async function showQuotaSummary(_args, ctx) {
+    const key = (readKey() || "").trim();
+    if (!key) {
+      ctx?.ui?.notify?.("pi-nan: no NaN API key found (set $NAN_API_KEY or ~/.config/nan/api-key)", "info");
+      return;
+    }
+
+    let quota;
+    try {
+      const response = await fetchImpl(QUOTA_URL, {
+        headers: { Authorization: `Bearer ${key}`, "User-Agent": USER_AGENT },
+      });
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      quota = await response.json();
+    } catch {
+      ctx?.ui?.notify?.("pi-nan: quota fetch failed", "error");
+      return;
+    }
+
+    if (!quota?.models?.length) return;
+
+    const lines = sortByRatioDesc(quota.models).map((m) => {
+      const pct = Math.round(ratio(m) * 100);
+      const reset = m.periodEnd ? ` · reset ${relativeTime(m.periodEnd, now())}` : "";
+      return `${m.model}: ${humanCount(m.tokensUsed)}/${humanCount(m.cap)} (${pct}%)${reset}`;
+    });
+
+    ctx?.ui?.notify?.(lines.join("\n"), "info");
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     await refreshStatus(ctx);
+  });
+
+  pi.registerCommand("nan", {
+    description: "Show full NaN quota summary for all models",
+    handler: showQuotaSummary,
   });
 }
