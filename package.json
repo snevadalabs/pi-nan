@@ -4,6 +4,13 @@
   "description": "Shows NaN subscription quota in pi's status bar",
   "type": "module",
   "license": "MIT",
+  "repository": "github:snevadalabs/pi-nan",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.js"
+  ],
   "main": "./index.js",
   "pi": {
     "extensions": ["./index.js"]
