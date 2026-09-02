@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const QUOTA_URL = "https://cloud-api.nan.builders/api/usage/quota";
-const USER_AGENT = "pi-nan/0.1 (+pi-nan)";
+const USER_AGENT = "pi-nan/0.1.0 (+https://github.com/snevadalabs/pi-nan)";
 const WARNING_RATIO = 0.8;
 const KEY_FILE = join(homedir(), ".config", "nan", "api-key");
 
@@ -18,7 +18,8 @@ function defaultReadKey() {
 }
 
 function ratio(model) {
-  return model.cap ? model.tokensUsed / model.cap : 0;
+  const r = model.cap ? model.tokensUsed / model.cap : 0;
+  return Number.isFinite(r) ? r : 0;
 }
 
 function mostConstrained(models) {
@@ -27,14 +28,16 @@ function mostConstrained(models) {
 
 function relativeTime(isoDate, now) {
   const diffMs = new Date(isoDate).getTime() - now.getTime();
-  const hours = Math.round(diffMs / (60 * 60 * 1000));
+  const hours = Math.floor(diffMs / (60 * 60 * 1000));
+  if (!Number.isFinite(hours)) return "?";
   if (hours <= 0) return "0h";
   if (hours < 24) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function setQuotaStatus(ctx, model, now) {
   let theme;
+  // try/catch is load-bearing: ui.theme is a getter that can throw before pi-web initTheme.
   try {
     theme = ctx?.ui?.theme;
     if (!theme?.fg) return;
@@ -43,8 +46,9 @@ function setQuotaStatus(ctx, model, now) {
   }
   if (!ctx?.ui?.setStatus) return;
 
-  const pct = Math.round(ratio(model) * 100);
-  const pctTone = ratio(model) >= WARNING_RATIO ? "warning" : "text";
+  const r = ratio(model);
+  const pct = Math.round(r * 100);
+  const pctTone = r >= WARNING_RATIO ? "warning" : "text";
   const reset = model.periodEnd ? ` · reset ${relativeTime(model.periodEnd, now)}` : "";
 
   const text =
