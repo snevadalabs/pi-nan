@@ -2,7 +2,7 @@
 
 Shows your NaN subscription quota in pi's bottom status bar.
 
-Install as a pi package and set `NAN_API_KEY` (or write your key to
+Install as a pi package (`@sierranevadalabs/pi-nan` on npm) and set `NAN_API_KEY` (or write your key to
 `~/.config/nan/api-key`) — the status bar will show your most-constrained
 model's usage on session start, and refreshes after each agent turn (at most
 once every 5 minutes). The percentage turns to the warning color at 80%

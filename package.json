@@ -1,5 +1,5 @@
 {
-  "name": "pi-nan",
+  "name": "@sierranevadalabs/pi-nan",
   "version": "0.1.0",
   "description": "Shows NaN subscription quota in pi's status bar",
   "type": "module",
