@@ -160,6 +160,23 @@ test("fetch failure leaves status untouched and notifies nothing", async () => {
   assert.equal(ctx.notifications.length, 0);
 });
 
+test("non-ok response is treated as a fetch failure", async () => {
+  const fetchImpl = async () => ({ ok: false });
+
+  const { events, commands } = createHarness({ fetchImpl, readKey: () => "secret-key" });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+
+  assert.equal(ctx.statuses.length, 0);
+  assert.equal(ctx.notifications.length, 0);
+
+  await commands.get("nan").handler("", ctx);
+
+  assert.equal(ctx.notifications.length, 1);
+  assert.equal(ctx.notifications[0].level, "error");
+});
+
 test("model at or above 80% fires one warning notification naming it", async () => {
   const fetchImpl = async () => ({
     ok: true,
@@ -290,6 +307,25 @@ test("/nan command lists all models, most-constrained first, and bypasses the th
   assert.match(message, /30%/);
 });
 
+test("/nan command formats billion-token usage and caps with the B tier", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () =>
+      quotaResponse([{ model: "big", tokensUsed: 1_500_000_000, cap: 2_000_000_000, periodEnd: "2026-09-05T00:00:00Z" }]),
+  });
+
+  const { commands } = createHarness({
+    fetchImpl,
+    readKey: () => "secret-key",
+    now: () => new Date("2026-09-02T00:00:00Z"),
+  });
+  const ctx = createCtx();
+
+  await commands.get("nan").handler("", ctx);
+
+  assert.match(ctx.notifications[0].message, /1\.5B\/2\.0B/);
+});
+
 test("/nan command with no key shows the existing no-key notice", async () => {
   const fetchImpl = async () => {
     throw new Error("should not be called");
@@ -303,6 +339,20 @@ test("/nan command with no key shows the existing no-key notice", async () => {
   assert.equal(ctx.notifications.length, 1);
   assert.equal(ctx.notifications[0].level, "info");
   assert.match(ctx.notifications[0].message, /NAN_API_KEY/);
+});
+
+test("/nan command with no key notifies every invocation, not once", async () => {
+  const fetchImpl = async () => {
+    throw new Error("should not be called");
+  };
+
+  const { commands } = createHarness({ fetchImpl, readKey: () => "" });
+  const ctx = createCtx();
+
+  await commands.get("nan").handler("", ctx);
+  await commands.get("nan").handler("", ctx);
+
+  assert.equal(ctx.notifications.length, 2);
 });
 
 test("/nan command notifies an error on fetch failure", async () => {
