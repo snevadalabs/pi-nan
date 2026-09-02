@@ -425,3 +425,21 @@ test("no key: agent_end inside the throttle window does not repeat the startup n
 
   assert.equal(ctx.notifications.length, 1);
 });
+
+test("no key: agent_end after the throttle window still does not repeat the startup notice", async () => {
+  let clock = new Date("2026-09-02T00:00:00Z");
+  const fetchImpl = async () => {
+    throw new Error("should not be called");
+  };
+
+  const { events } = createHarness({ fetchImpl, readKey: () => "", now: () => clock });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  clock = new Date("2026-09-02T00:05:01Z");
+  await events.get("agent_end")({}, ctx);
+  clock = new Date("2026-09-02T00:10:02Z");
+  await events.get("agent_end")({}, ctx);
+
+  assert.equal(ctx.notifications.length, 1);
+});

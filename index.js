@@ -8,6 +8,7 @@ const WARNING_RATIO = 0.8;
 // ponytail: refresh cadence is hardcoded at 5 minutes; make it configurable if a use case needs a different one.
 const REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 const KEY_FILE = join(homedir(), ".config", "nan", "api-key");
+const NO_KEY_MSG = "pi-nan: no NaN API key found (set $NAN_API_KEY or ~/.config/nan/api-key)";
 
 function defaultReadKey() {
   const envKey = (process.env.NAN_API_KEY || "").trim();
@@ -26,10 +27,6 @@ function ratio(model) {
 
 function mostConstrained(models) {
   return models.reduce((best, m) => (ratio(m) > ratio(best) ? m : best));
-}
-
-function sortByRatioDesc(models) {
-  return [...models].sort((a, b) => ratio(b) - ratio(a));
 }
 
 function humanCount(n) {
@@ -85,24 +82,32 @@ function warnOverQuota(ctx, models, warned) {
 }
 
 export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultReadKey, now = () => new Date() } = {}) {
-  let lastAttemptAt = null;
+  let lastAttemptAt = -Infinity;
+  let notifiedNoKey = false;
   const warned = new Set();
+
+  async function fetchQuota(key) {
+    const response = await fetchImpl(QUOTA_URL, {
+      headers: { Authorization: `Bearer ${key}`, "User-Agent": USER_AGENT },
+    });
+    if (!response.ok) throw new Error();
+    return response.json();
+  }
 
   async function refreshStatus(ctx) {
     lastAttemptAt = now().getTime();
     const key = (readKey() || "").trim();
     if (!key) {
-      ctx?.ui?.notify?.("pi-nan: no NaN API key found (set $NAN_API_KEY or ~/.config/nan/api-key)", "info");
+      if (!notifiedNoKey) {
+        notifiedNoKey = true;
+        ctx?.ui?.notify?.(NO_KEY_MSG, "info");
+      }
       return;
     }
 
     let quota;
     try {
-      const response = await fetchImpl(QUOTA_URL, {
-        headers: { Authorization: `Bearer ${key}`, "User-Agent": USER_AGENT },
-      });
-      if (!response.ok) return;
-      quota = await response.json();
+      quota = await fetchQuota(key);
     } catch {
       return;
     }
@@ -116,17 +121,13 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
   async function showQuotaSummary(_args, ctx) {
     const key = (readKey() || "").trim();
     if (!key) {
-      ctx?.ui?.notify?.("pi-nan: no NaN API key found (set $NAN_API_KEY or ~/.config/nan/api-key)", "info");
+      ctx?.ui?.notify?.(NO_KEY_MSG, "info");
       return;
     }
 
     let quota;
     try {
-      const response = await fetchImpl(QUOTA_URL, {
-        headers: { Authorization: `Bearer ${key}`, "User-Agent": USER_AGENT },
-      });
-      if (!response.ok) throw new Error(`status ${response.status}`);
-      quota = await response.json();
+      quota = await fetchQuota(key);
     } catch {
       ctx?.ui?.notify?.("pi-nan: quota fetch failed", "error");
       return;
@@ -134,7 +135,7 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
 
     if (!quota?.models?.length) return;
 
-    const lines = sortByRatioDesc(quota.models).map((m) => {
+    const lines = [...quota.models].sort((a, b) => ratio(b) - ratio(a)).map((m) => {
       const pct = Math.round(ratio(m) * 100);
       const reset = m.periodEnd ? ` · reset ${relativeTime(m.periodEnd, now())}` : "";
       return `${m.model}: ${humanCount(m.tokensUsed)}/${humanCount(m.cap)} (${pct}%)${reset}`;
@@ -148,8 +149,7 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    const nowMs = now().getTime();
-    if (lastAttemptAt !== null && nowMs - lastAttemptAt < REFRESH_THROTTLE_MS) return;
+    if (now().getTime() - lastAttemptAt < REFRESH_THROTTLE_MS) return;
     await refreshStatus(ctx);
   });
 
