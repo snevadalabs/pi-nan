@@ -1,0 +1,14 @@
+{
+  "name": "pi-nan",
+  "version": "0.1.0",
+  "description": "Shows NaN subscription quota in pi's status bar",
+  "type": "module",
+  "license": "MIT",
+  "main": "./index.js",
+  "pi": {
+    "extensions": ["./index.js"]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
