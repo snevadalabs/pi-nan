@@ -3,14 +3,13 @@
   "version": "0.1.0",
   "description": "Shows NaN subscription quota in pi's status bar",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": "github:snevadalabs/pi-nan",
   "engines": {
     "node": ">=18"
   },
   "files": [
-    "index.js",
-    "NOTICE"
+    "index.js"
   ],
   "main": "./index.js",
   "pi": {
