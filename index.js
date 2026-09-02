@@ -62,8 +62,21 @@ function setQuotaStatus(ctx, model, now) {
   ctx.ui.setStatus("nan", text);
 }
 
+function warnOverQuota(ctx, models, warned) {
+  for (const model of models) {
+    const r = ratio(model);
+    if (r < WARNING_RATIO) continue;
+    const warnKey = `${model.model}:${model.periodEnd}`;
+    if (warned.has(warnKey)) continue;
+    warned.add(warnKey);
+    const pct = Math.round(r * 100);
+    ctx?.ui?.notify?.(`pi-nan: ${model.model} at ${pct}% of quota`, "warning");
+  }
+}
+
 export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultReadKey, now = () => new Date() } = {}) {
   let lastAttemptAt = null;
+  const warned = new Set();
 
   async function refreshStatus(ctx) {
     lastAttemptAt = now().getTime();
@@ -87,6 +100,7 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
     if (!quota?.models?.length) return;
 
     setQuotaStatus(ctx, mostConstrained(quota.models), now());
+    warnOverQuota(ctx, quota.models, warned);
   }
 
   pi.on("session_start", async (_event, ctx) => {

@@ -73,7 +73,8 @@ test("session_start with a key fetches quota and shows the most-constrained mode
   assert.match(ctx.statuses[0].text, /qwen/);
   assert.match(ctx.statuses[0].text, /90%/);
   assert.match(ctx.statuses[0].text, /3d/);
-  assert.equal(ctx.notifications.length, 0);
+  assert.equal(ctx.notifications.length, 1);
+  assert.match(ctx.notifications[0].message, /qwen/);
 });
 
 test("model at or above 80% is rendered with the warning color", async () => {
@@ -153,6 +154,94 @@ test("fetch failure leaves status untouched and notifies nothing", async () => {
 
   assert.equal(ctx.statuses.length, 0);
   assert.equal(ctx.notifications.length, 0);
+});
+
+test("model at or above 80% fires one warning notification naming it", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () =>
+      quotaResponse([{ model: "glm", tokensUsed: 80, cap: 100, periodEnd: "2026-09-05T00:00:00Z" }]),
+  });
+
+  const { events } = createHarness({
+    fetchImpl,
+    readKey: () => "secret-key",
+    now: () => new Date("2026-09-02T00:00:00Z"),
+  });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+
+  assert.equal(ctx.notifications.length, 1);
+  assert.equal(ctx.notifications[0].level, "warning");
+  assert.match(ctx.notifications[0].message, /glm/);
+  assert.match(ctx.notifications[0].message, /80%/);
+});
+
+test("a re-fetch in the same billing period does not re-warn", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () =>
+      quotaResponse([{ model: "glm", tokensUsed: 80, cap: 100, periodEnd: "2026-09-05T00:00:00Z" }]),
+  });
+
+  const { events } = createHarness({
+    fetchImpl,
+    readKey: () => "secret-key",
+    now: () => new Date("2026-09-02T00:00:00Z"),
+  });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  await events.get("session_start")({}, ctx);
+
+  assert.equal(ctx.notifications.length, 1);
+});
+
+test("a new periodEnd re-arms the warning for that model", async () => {
+  let periodEnd = "2026-09-05T00:00:00Z";
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () =>
+      quotaResponse([{ model: "glm", tokensUsed: 80, cap: 100, periodEnd }]),
+  });
+
+  const { events } = createHarness({
+    fetchImpl,
+    readKey: () => "secret-key",
+    now: () => new Date("2026-09-02T00:00:00Z"),
+  });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+  periodEnd = "2026-10-05T00:00:00Z";
+  await events.get("session_start")({}, ctx);
+
+  assert.equal(ctx.notifications.length, 2);
+});
+
+test("a model that is not the most-constrained one also warns", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () =>
+      quotaResponse([
+        { model: "glm", tokensUsed: 95, cap: 100, periodEnd: "2026-09-05T00:00:00Z" },
+        { model: "qwen", tokensUsed: 80, cap: 100, periodEnd: "2026-09-05T00:00:00Z" },
+      ]),
+  });
+
+  const { events } = createHarness({
+    fetchImpl,
+    readKey: () => "secret-key",
+    now: () => new Date("2026-09-02T00:00:00Z"),
+  });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+
+  const messages = ctx.notifications.map((n) => n.message);
+  assert.ok(messages.some((m) => m.includes("glm")));
+  assert.ok(messages.some((m) => m.includes("qwen")));
 });
 
 test("cap of 0 is treated as ratio 0 without throwing", async () => {
