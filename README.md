@@ -21,7 +21,12 @@ refresh, `/nan` always fetches fresh data.
 
 Each count is followed by `→` and the projection for the whole month at the
 current pace, scaled by the length of the month. The last day is partial, so
-the projection is a pace and not a promise.
+the projection is a pace and not a promise. The status bar also counts down
+to the reset: the window is the calendar month, so the counter rolls over on
+the 1st.
+
+`glm5.3` counts against a billing period instead of the calendar month, so
+its own reset comes later than the one shown.
 
 Usage comes from the documented `GET /v1/usage` endpoint, so the numbers
 match the ones on the platform. NaN does not publish per-model allowances as

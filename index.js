@@ -21,13 +21,16 @@ function defaultReadKey() {
 
 function usageUrl(now) {
   const today = now().toISOString().slice(0, 10);
-  return `${USAGE_URL}?start_date=${today.slice(0, 8)}01&end_date=${today}`;
+  const monthStart = `${today.slice(0, 8)}01`;
+  return `${USAGE_URL}?start_date=${monthStart}&end_date=${today}`;
 }
 
-function monthLabel(isoDate) {
-  if (!isoDate) return "";
-  // timeZone: UTC is load-bearing: a UTC midnight read in a negative offset lands in the previous month.
-  return new Date(`${isoDate}T00:00:00Z`).toLocaleString("en", { month: "short", timeZone: "UTC" });
+// Days until the window rolls over, i.e. until the 1st of the next UTC month.
+function resetLabel(endDate) {
+  if (!endDate) return "";
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const nextMonth = Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1);
+  return `resets in ${Math.round((nextMonth - end.getTime()) / 86_400_000)}d`;
 }
 
 function humanCount(n) {
@@ -56,7 +59,7 @@ function projection(tokens, usage) {
   return Math.round((tokens / day) * daysInMonth);
 }
 
-function tokenCount(tokens, usage) {
+function tokenText(tokens, usage) {
   const projected = projection(tokens, usage);
   return projected == null ? humanCount(tokens) : `${humanCount(tokens)} → ${humanCount(projected)}`;
 }
@@ -72,12 +75,11 @@ function setUsageStatus(ctx, usage, model) {
   }
   if (!ctx?.ui?.setStatus) return;
 
-  const month = monthLabel(usage?.start_date);
+  const reset = resetLabel(usage?.end_date);
   const text =
     theme.fg("muted", "nan: ") +
-    theme.fg("text", model.model + " ") +
-    theme.fg("text", tokenCount(model.total_tokens, usage)) +
-    theme.fg("muted", month ? ` · ${month}` : "");
+    theme.fg("text", `${model.model} ${tokenText(model.total_tokens, usage)}`) +
+    theme.fg("muted", reset ? ` · ${reset}` : "");
 
   ctx.ui.setStatus("nan", text);
 }
@@ -136,13 +138,13 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
     const models = byModel(usage);
     if (!models.length) return;
 
-    const month = monthLabel(usage?.start_date);
+    const reset = resetLabel(usage?.end_date);
     const lines = [...models]
       .sort((a, b) => b.total_tokens - a.total_tokens)
-      .map((m) => `${m.model}: ${tokenCount(m.total_tokens, usage)} (${m.api_requests} req)`);
+      .map((m) => `${m.model}: ${tokenText(m.total_tokens, usage)} (${m.api_requests} req)`);
     lines.push(`all time: ${humanCount(usage.all_time?.total_tokens ?? 0)}`);
 
-    ctx?.ui?.notify?.(`nan usage${month ? ` · ${month}` : ""}:\n${lines.join("\n")}`, "info");
+    ctx?.ui?.notify?.(`nan usage${reset ? ` · ${reset}` : ""}:\n${lines.join("\n")}`, "info");
   }
 
   pi.on("session_start", async (_event, ctx) => {

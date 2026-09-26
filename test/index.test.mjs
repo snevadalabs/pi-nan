@@ -89,7 +89,7 @@ test("session_start fetches usage for this month and shows the most-used model",
   assert.equal(ctx.statuses[0].key, "nan");
   assert.match(ctx.statuses[0].text, /qwen3\.8-flash/);
   assert.match(ctx.statuses[0].text, /483k → 557k/);
-  assert.match(ctx.statuses[0].text, /Sep/);
+  assert.match(ctx.statuses[0].text, /resets in 5d/);
   assert.equal(ctx.notifications.length, 0);
 });
 
@@ -121,6 +121,20 @@ test("the projection counts a leap February as 29 days", async () => {
   assert.match(ctx.statuses[0].text, /100 → 290/, "29-day February");
 });
 
+test("the reset countdown rolls over the year boundary", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => usageResponse([{ model: "glm", total_tokens: 10, api_requests: 1 }], { end_date: "2026-12-15" }),
+  });
+
+  const { events } = createHarness({ fetchImpl, readKey: () => "secret-key", now: () => CLOCK });
+  const ctx = createCtx();
+
+  await events.get("session_start")({}, ctx);
+
+  assert.match(ctx.statuses[0].text, /resets in 17d/, "Dec 15 to Jan 1");
+});
+
 test("a response without end_date shows the raw count and no projection", async () => {
   const fetchImpl = async () => ({
     ok: true,
@@ -134,6 +148,7 @@ test("a response without end_date shows the raw count and no projection", async 
 
   assert.match(ctx.statuses[0].text, /483k/);
   assert.doesNotMatch(ctx.statuses[0].text, /→/);
+  assert.doesNotMatch(ctx.statuses[0].text, /resets/);
 });
 
 test("session_start with no usage rows leaves the status untouched", async () => {
@@ -240,7 +255,7 @@ test("/nan lists every model, most-used first, with the all-time total", async (
   assert.match(message, /qwen3\.8-flash: 483k → 557k \(40 req\)/);
   assert.match(message, /glm5\.3-flash: 30k → 34k \(12 req\)/);
   assert.match(message, /all time: 1\.6B/);
-  assert.match(message, /Sep/);
+  assert.match(message, /resets in 5d/);
 });
 
 test("/nan bypasses the refresh throttle", async () => {
