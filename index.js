@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const QUOTA_URL = "https://cloud-api.nan.builders/api/usage/quota";
+const USAGE_URL = "https://api.nan.builders/v1/usage";
 const USER_AGENT = "pi-nan/0.1.0 (+https://github.com/snevadalabs/pi-nan)";
-const WARNING_RATIO = 0.8;
 // ponytail: refresh cadence is hardcoded at 5 minutes; make it configurable if a use case needs a different one.
 const REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 const KEY_FILE = join(homedir(), ".config", "nan", "api-key");
@@ -20,13 +19,15 @@ function defaultReadKey() {
   }
 }
 
-function ratio(model) {
-  const r = model.cap ? model.tokensUsed / model.cap : 0;
-  return Number.isFinite(r) ? r : 0;
+function usageUrl(now) {
+  const today = now().toISOString().slice(0, 10);
+  return `${USAGE_URL}?start_date=${today.slice(0, 8)}01&end_date=${today}`;
 }
 
-function mostConstrained(models) {
-  return models.reduce((best, m) => (ratio(m) > ratio(best) ? m : best));
+function monthLabel(isoDate) {
+  if (!isoDate) return "";
+  // timeZone: UTC is load-bearing: a UTC midnight read in a negative offset lands in the previous month.
+  return new Date(`${isoDate}T00:00:00Z`).toLocaleString("en", { month: "short", timeZone: "UTC" });
 }
 
 function humanCount(n) {
@@ -36,16 +37,31 @@ function humanCount(n) {
   return `${n}`;
 }
 
-function relativeTime(isoDate, now) {
-  const diffMs = new Date(isoDate).getTime() - now.getTime();
-  const hours = Math.floor(diffMs / (60 * 60 * 1000));
-  if (!Number.isFinite(hours)) return "?";
-  if (hours <= 0) return "0h";
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+function byModel(usage) {
+  // totals.by_model covers the whole window; `data` is paginated, so never page through it.
+  return usage?.totals?.by_model ?? [];
 }
 
-function setQuotaStatus(ctx, model, now) {
+function mostUsed(models) {
+  return models.reduce((best, m) => (m.total_tokens > best.total_tokens ? m : best));
+}
+
+// Month-to-date at the current rate. A rough pace, not a fact: the last day is partial.
+function projection(tokens, usage) {
+  const end = usage?.end_date;
+  if (!end) return null;
+  const day = Number(end.slice(8, 10));
+  if (!day) return null;
+  const daysInMonth = new Date(Date.UTC(Number(end.slice(0, 4)), Number(end.slice(5, 7)), 0)).getUTCDate();
+  return Math.round((tokens / day) * daysInMonth);
+}
+
+function tokenCount(tokens, usage) {
+  const projected = projection(tokens, usage);
+  return projected == null ? humanCount(tokens) : `${humanCount(tokens)} → ${humanCount(projected)}`;
+}
+
+function setUsageStatus(ctx, usage, model) {
   let theme;
   // try/catch is load-bearing: ui.theme is a getter that can throw before pi-web initTheme.
   try {
@@ -56,39 +72,22 @@ function setQuotaStatus(ctx, model, now) {
   }
   if (!ctx?.ui?.setStatus) return;
 
-  const r = ratio(model);
-  const pct = Math.round(r * 100);
-  const pctTone = r >= WARNING_RATIO ? "warning" : "text";
-  const reset = model.periodEnd ? ` · reset ${relativeTime(model.periodEnd, now)}` : "";
-
+  const month = monthLabel(usage?.start_date);
   const text =
     theme.fg("muted", "nan: ") +
     theme.fg("text", model.model + " ") +
-    theme.fg(pctTone, `${pct}%`) +
-    theme.fg("muted", reset);
+    theme.fg("text", tokenCount(model.total_tokens, usage)) +
+    theme.fg("muted", month ? ` · ${month}` : "");
 
   ctx.ui.setStatus("nan", text);
-}
-
-function warnOverQuota(ctx, models, warned) {
-  for (const model of models) {
-    const r = ratio(model);
-    if (r < WARNING_RATIO) continue;
-    const warnKey = `${model.model}:${model.periodEnd}`;
-    if (warned.has(warnKey)) continue;
-    warned.add(warnKey);
-    const pct = Math.round(r * 100);
-    ctx?.ui?.notify?.(`pi-nan: ${model.model} at ${pct}% of quota`, "warning");
-  }
 }
 
 export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultReadKey, now = () => new Date() } = {}) {
   let lastAttemptAt = -Infinity;
   let notifiedNoKey = false;
-  const warned = new Set();
 
-  async function fetchQuota(key) {
-    const response = await fetchImpl(QUOTA_URL, {
+  async function fetchUsage(key) {
+    const response = await fetchImpl(usageUrl(now), {
       headers: { Authorization: `Bearer ${key}`, "User-Agent": USER_AGENT },
     });
     if (!response.ok) throw new Error();
@@ -106,43 +105,44 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
       return;
     }
 
-    let quota;
+    let usage;
     try {
-      quota = await fetchQuota(key);
+      usage = await fetchUsage(key);
     } catch {
       return;
     }
 
-    if (!quota?.models?.length) return;
+    const models = byModel(usage);
+    if (!models.length) return;
 
-    setQuotaStatus(ctx, mostConstrained(quota.models), now());
-    warnOverQuota(ctx, quota.models, warned);
+    setUsageStatus(ctx, usage, mostUsed(models));
   }
 
-  async function showQuotaSummary(_args, ctx) {
+  async function showUsageSummary(_args, ctx) {
     const key = (readKey() || "").trim();
     if (!key) {
       ctx?.ui?.notify?.(NO_KEY_MSG, "info");
       return;
     }
 
-    let quota;
+    let usage;
     try {
-      quota = await fetchQuota(key);
+      usage = await fetchUsage(key);
     } catch {
-      ctx?.ui?.notify?.("pi-nan: quota fetch failed", "error");
+      ctx?.ui?.notify?.("pi-nan: usage fetch failed", "error");
       return;
     }
 
-    if (!quota?.models?.length) return;
+    const models = byModel(usage);
+    if (!models.length) return;
 
-    const lines = [...quota.models].sort((a, b) => ratio(b) - ratio(a)).map((m) => {
-      const pct = Math.round(ratio(m) * 100);
-      const reset = m.periodEnd ? ` · reset ${relativeTime(m.periodEnd, now())}` : "";
-      return `${m.model}: ${humanCount(m.tokensUsed)}/${humanCount(m.cap)} (${pct}%)${reset}`;
-    });
+    const month = monthLabel(usage?.start_date);
+    const lines = [...models]
+      .sort((a, b) => b.total_tokens - a.total_tokens)
+      .map((m) => `${m.model}: ${tokenCount(m.total_tokens, usage)} (${m.api_requests} req)`);
+    lines.push(`all time: ${humanCount(usage.all_time?.total_tokens ?? 0)}`);
 
-    ctx?.ui?.notify?.(lines.join("\n"), "info");
+    ctx?.ui?.notify?.(`nan usage${month ? ` · ${month}` : ""}:\n${lines.join("\n")}`, "info");
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -155,7 +155,7 @@ export default function nanExtension(pi, { fetchImpl = fetch, readKey = defaultR
   });
 
   pi.registerCommand("nan", {
-    description: "Show full NaN quota summary for all models",
-    handler: showQuotaSummary,
+    description: "Show NaN token usage for this month, per model",
+    handler: showUsageSummary,
   });
 }
