@@ -1,10 +1,13 @@
 {
   "name": "@sierranevadalabs/pi-nan",
-  "version": "0.1.0",
-  "description": "Shows NaN subscription quota in pi's status bar",
+  "version": "0.2.0",
+  "description": "Shows NaN token usage in pi's status bar",
   "type": "module",
   "license": "MIT",
-  "repository": "github:snevadalabs/pi-nan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snevadalabs/pi-nan.git"
+  },
   "engines": {
     "node": ">=18"
   },
@@ -18,15 +21,18 @@
   },
   "keywords": [
     "pi",
+    "pi-package",
     "pi-extension",
     "nan",
     "quota",
+    "usage",
     "status-bar"
   ],
   "pi": {
     "extensions": ["./index.js"]
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "prepublishOnly": "npm test"
   }
 }

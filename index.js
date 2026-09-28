@@ -3,7 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const USAGE_URL = "https://api.nan.builders/v1/usage";
-const USER_AGENT = "pi-nan/0.1.0 (+https://github.com/snevadalabs/pi-nan)";
+// Bump with package.json: this string is not read from there, so the two must stay in sync.
+const USER_AGENT = "pi-nan/0.2.0 (+https://github.com/snevadalabs/pi-nan)";
 // ponytail: refresh cadence is hardcoded at 5 minutes; make it configurable if a use case needs a different one.
 const REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 const KEY_FILE = join(homedir(), ".config", "nan", "api-key");
